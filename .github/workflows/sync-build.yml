@@ -1,7 +1,14 @@
 name: Sync & Build workbuddy2api-panel
 
+# 从上游 clone 源码后自己构建，推送两个 registry：
+#   ghcr.io/viciy2023/wb2panel-deploy    —— GHCR，备用通道
+#   ccy2026/workbuddy2api-panel          —— Docker Hub，飞牛实际拉取的那条
+#
+# 命名跟惯例对齐：<用户名>/<镜像名>:<标签>，一个服务占一个仓库。
+
 on:
   schedule:
+    # 每 4 小时一次；UTC 00/04/08/12/16/20 = 北京 08/12/16/20/00/04 点
     - cron: '0 0,4,8,12,16,20 * * *'
   workflow_dispatch:
 
@@ -9,6 +16,8 @@ env:
   UPSTREAM_REPO: linguo2625469/workbuddy2api-panel
   UPSTREAM_BRANCH: main
   IMAGE_NAME: ghcr.io/viciy2023/wb2panel-deploy
+  # Docker Hub 上的仓库名。完整镜像名是 <DOCKERHUB_USERNAME>/workbuddy2api-panel。
+  DOCKERHUB_REPO: workbuddy2api-panel
   BUILD_REV: v1
 
 jobs:
@@ -86,12 +95,36 @@ jobs:
             echo "Created config.json from config.example.json"
           fi
 
+      # 先算出要推的标签：Docker Hub 凭据没配时就不含它，避免登录失败把构建拖垮。
+      - name: 组装推送目标
+        id: tags
+        run: |
+          SHA="${{ needs.check.outputs.upstream_sha }}"
+          TAGS="${IMAGE_NAME}:latest,${IMAGE_NAME}:${SHA}"
+          if [ -n "${{ secrets.DOCKERHUB_TOKEN }}" ] && [ -n "${{ secrets.DOCKERHUB_USERNAME }}" ]; then
+            DEST="docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${DOCKERHUB_REPO}"
+            TAGS="${TAGS},${DEST}:latest,${DEST}:${SHA}"
+            echo "hub=true" >> "$GITHUB_OUTPUT"
+            echo "Docker Hub 凭据已配置，将同时推送 ${DEST}。"
+          else
+            echo "hub=false" >> "$GITHUB_OUTPUT"
+            echo "未配置 Docker Hub 凭据，本次只推送 GHCR。"
+          fi
+          echo "value=${TAGS}" >> "$GITHUB_OUTPUT"
+
       - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        if: steps.tags.outputs.hub == 'true'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -101,9 +134,7 @@ jobs:
         with:
           context: ./upstream
           push: true
-          tags: |
-            ${{ env.IMAGE_NAME }}:latest
-            ${{ env.IMAGE_NAME }}:${{ needs.check.outputs.upstream_sha }}
+          tags: ${{ steps.tags.outputs.value }}
 
       - name: Record built fingerprint
         run: |
