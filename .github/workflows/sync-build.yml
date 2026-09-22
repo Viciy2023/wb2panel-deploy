@@ -18,7 +18,8 @@ env:
   IMAGE_NAME: ghcr.io/viciy2023/wb2panel-deploy
   # Docker Hub 上的仓库名。完整镜像名是 <DOCKERHUB_USERNAME>/workbuddy2api-panel。
   DOCKERHUB_REPO: workbuddy2api-panel
-  BUILD_REV: v1
+  BUILD_REV: v2
+  # 递增说明：构建产物增加了 Docker Hub 目标（ccy2026/wb2panel）。
 
 jobs:
   check:
